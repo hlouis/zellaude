@@ -3,6 +3,7 @@ mod installer;
 mod render;
 mod state;
 mod tab_pane_map;
+mod theme;
 
 use state::{unix_now, unix_now_ms, HookPayload, MenuAction, SessionInfo, Settings, State, ViewMode};
 use std::collections::BTreeMap;
@@ -64,6 +65,8 @@ impl ZellijPlugin for State {
                 if let Some(name) = mode_info.session_name {
                     self.zellij_session_name = Some(name);
                 }
+                // Follow the active Zellij theme (re-fires on dark/light toggle)
+                self.theme = theme::Theme::from_styling(&mode_info.style.colors);
                 true
             }
             Event::Mouse(Mouse::LeftClick(_, col)) => {
@@ -85,7 +88,7 @@ impl ZellijPlugin for State {
                         for region in &self.click_regions {
                             if col >= region.start_col && col < region.end_col {
                                 if region.is_waiting {
-                                    focus_terminal_pane(region.pane_id, false);
+                                    focus_terminal_pane(region.pane_id, false, false);
                                 } else {
                                     switch_tab_to(region.tab_index as u32 + 1);
                                 }
@@ -198,7 +201,7 @@ impl ZellijPlugin for State {
                 // Notification click — focus the requested pane
                 if let Some(ref payload) = pipe_message.payload {
                     if let Ok(pane_id) = payload.trim().parse::<u32>() {
-                        focus_terminal_pane(pane_id, false);
+                        focus_terminal_pane(pane_id, false, false);
                     }
                 }
                 false

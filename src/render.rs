@@ -2,15 +2,14 @@ use crate::state::{
     unix_now, unix_now_ms, Activity, ClickRegion, FlashMode, MenuAction, MenuClickRegion,
     NotifyMode, SessionInfo, SettingKey, State, ViewMode,
 };
+use crate::theme::{Rgb, Theme};
 use std::fmt::Write;
 use std::io::Write as IoWrite;
 use zellij_tile::prelude::{InputMode, TabInfo};
 
 struct Style {
     symbol: &'static str,
-    r: u8,
-    g: u8,
-    b: u8,
+    color: Rgb,
 }
 
 fn activity_priority(activity: &Activity) -> u8 {
@@ -27,10 +26,11 @@ fn activity_priority(activity: &Activity) -> u8 {
     }
 }
 
-fn activity_style(activity: &Activity) -> Style {
+/// Symbol per activity is fixed; color comes from the theme's accent palette.
+fn activity_style(activity: &Activity, theme: &Theme) -> Style {
     match activity {
-        Activity::Init => Style { symbol: "◆", r: 180, g: 175, b: 195 },
-        Activity::Thinking => Style { symbol: "●", r: 180, g: 140, b: 255 },
+        Activity::Init => Style { symbol: "◆", color: theme.gray },
+        Activity::Thinking => Style { symbol: "●", color: theme.purple },
         Activity::Tool(name) => {
             let symbol = match name.as_str() {
                 "Bash" => "⚡",
@@ -40,22 +40,22 @@ fn activity_style(activity: &Activity) -> Style {
                 "WebSearch" | "WebFetch" => "◈",
                 _ => "⚙",
             };
-            Style { symbol, r: 255, g: 170, b: 50 }
+            Style { symbol, color: theme.orange }
         }
-        Activity::Prompting => Style { symbol: "▶", r: 80, g: 200, b: 120 },
-        Activity::Waiting => Style { symbol: "⚠", r: 255, g: 60, b: 60 },
-        Activity::Notification => Style { symbol: "◇", r: 200, g: 200, b: 100 },
-        Activity::Done => Style { symbol: "✓", r: 80, g: 200, b: 120 },
-        Activity::AgentDone => Style { symbol: "✓", r: 80, g: 180, b: 100 },
-        Activity::Idle => Style { symbol: "○", r: 180, g: 175, b: 195 },
+        Activity::Prompting => Style { symbol: "▶", color: theme.green },
+        Activity::Waiting => Style { symbol: "⚠", color: theme.red },
+        Activity::Notification => Style { symbol: "◇", color: theme.yellow },
+        Activity::Done => Style { symbol: "✓", color: theme.green },
+        Activity::AgentDone => Style { symbol: "✓", color: theme.green },
+        Activity::Idle => Style { symbol: "○", color: theme.gray },
     }
 }
 
-fn fg(r: u8, g: u8, b: u8) -> String {
+fn fg((r, g, b): Rgb) -> String {
     format!("\x1b[38;2;{r};{g};{b}m")
 }
 
-fn bg(r: u8, g: u8, b: u8) -> String {
+fn bg((r, g, b): Rgb) -> String {
     format!("\x1b[48;2;{r};{g};{b}m")
 }
 
@@ -68,22 +68,9 @@ const BOLD: &str = "\x1b[1m";
 const ELAPSED_THRESHOLD: u64 = 30;
 const SEPARATOR: &str = "\u{e0b0}";
 
-type Color = (u8, u8, u8);
-const BAR_BG: Color = (30, 30, 46);
-const PREFIX_BG: Color = (60, 50, 80);
-const PREFIX_BG_SETTINGS: Color = (100, 70, 140);
-const TAB_BG_ACTIVE: Color = (140, 100, 200);
-const TAB_BG_INACTIVE: Color = (80, 75, 110);
-const FLASH_BG_BRIGHT: Color = (80, 80, 30);
-
 /// Write a powerline arrow: fg=from_bg, bg=to_bg, then separator char.
-fn arrow(buf: &mut String, col: &mut usize, from: Color, to: Color) {
-    let _ = write!(
-        buf,
-        "{}{}{SEPARATOR}",
-        fg(from.0, from.1, from.2),
-        bg(to.0, to.1, to.2),
-    );
+fn arrow(buf: &mut String, col: &mut usize, from: Rgb, to: Rgb) {
+    let _ = write!(buf, "{}{}{SEPARATOR}", fg(from), bg(to));
     *col += 1;
 }
 
@@ -97,22 +84,24 @@ fn format_elapsed(secs: u64) -> String {
     }
 }
 
-fn mode_style(mode: InputMode) -> (Color, &'static str) {
+/// Background color + label per input mode. Color is drawn from the theme's
+/// accent palette so the mode pill follows the active Zellij theme.
+fn mode_style(mode: InputMode, theme: &Theme) -> (Rgb, &'static str) {
     match mode {
-        InputMode::Normal => ((80, 200, 120), "NORMAL"),
-        InputMode::Locked => ((255, 80, 80), "LOCKED"),
-        InputMode::Pane => ((80, 180, 255), "PANE"),
-        InputMode::Tab => ((180, 140, 255), "TAB"),
-        InputMode::Resize => ((255, 170, 50), "RESIZE"),
-        InputMode::Move => ((255, 170, 50), "MOVE"),
-        InputMode::Scroll => ((200, 200, 100), "SCROLL"),
-        InputMode::EnterSearch => ((200, 200, 100), "SEARCH"),
-        InputMode::Search => ((200, 200, 100), "SEARCH"),
-        InputMode::RenameTab => ((200, 200, 100), "RENAME"),
-        InputMode::RenamePane => ((200, 200, 100), "RENAME"),
-        InputMode::Session => ((180, 140, 255), "SESSION"),
-        InputMode::Prompt => ((80, 200, 120), "PROMPT"),
-        InputMode::Tmux => ((80, 200, 120), "TMUX"),
+        InputMode::Normal => (theme.green, "NORMAL"),
+        InputMode::Locked => (theme.red, "LOCKED"),
+        InputMode::Pane => (theme.cyan, "PANE"),
+        InputMode::Tab => (theme.purple, "TAB"),
+        InputMode::Resize => (theme.orange, "RESIZE"),
+        InputMode::Move => (theme.orange, "MOVE"),
+        InputMode::Scroll => (theme.yellow, "SCROLL"),
+        InputMode::EnterSearch => (theme.yellow, "SEARCH"),
+        InputMode::Search => (theme.yellow, "SEARCH"),
+        InputMode::RenameTab => (theme.yellow, "RENAME"),
+        InputMode::RenamePane => (theme.yellow, "RENAME"),
+        InputMode::Session => (theme.purple, "SESSION"),
+        InputMode::Prompt => (theme.green, "PROMPT"),
+        InputMode::Tmux => (theme.green, "TMUX"),
     }
 }
 
@@ -120,13 +109,16 @@ pub fn render_status_bar(state: &mut State, _rows: usize, cols: usize) {
     state.click_regions.clear();
     state.menu_click_regions.clear();
 
+    // Copy the theme out so we can borrow `state` mutably below.
+    let theme = state.theme;
+
     let mut buf = String::with_capacity(cols * 4);
     // Terminal setup for a 1-row status bar:
     //  \x1b[H     — cursor home (prevent scroll from cursor at end-of-line)
     //  \x1b[?7l   — disable auto-wrap (clip overflow instead of scroll)
     //  \x1b[?25l  — hide cursor
     buf.push_str("\x1b[H\x1b[?7l\x1b[?25l");
-    let bar_bg_str = bg(BAR_BG.0, BAR_BG.1, BAR_BG.2);
+    let bar_bg_str = bg(theme.bar_bg);
 
     // Bail early if terminal is too narrow
     if cols < 5 {
@@ -137,13 +129,13 @@ pub fn render_status_bar(state: &mut State, _rows: usize, cols: usize) {
     }
 
     let prefix_bg = if state.view_mode == ViewMode::Settings {
-        PREFIX_BG_SETTINGS
+        theme.prefix_bg_settings
     } else {
-        PREFIX_BG
+        theme.prefix_bg
     };
 
     // Build prefix: " Zellaude (session) MODE "
-    let (mode_bg, mode_text) = mode_style(state.input_mode);
+    let (mode_bg, mode_text) = mode_style(state.input_mode, &theme);
     let show_mode = state.settings.mode_indicator;
     let session_part = match state.zellij_session_name.as_deref() {
         Some(name) => format!(" ({name})"),
@@ -154,21 +146,29 @@ pub fn render_status_bar(state: &mut State, _rows: usize, cols: usize) {
     let mode_pill_width = if show_mode { 1 + mode_text.len() + 1 } else { 0 };
     let total_prefix_width = prefix_width + mode_pill_width;
 
+    // Foreground matched to the prefix background's declaration, so it stays
+    // readable: settings → ribbon_selected pair, normal → ribbon_unselected.
+    let prefix_fg = if state.view_mode == ViewMode::Settings {
+        theme.text_active
+    } else {
+        theme.text_inactive
+    };
+
     // Render prefix segment (truncate if wider than cols)
     let mut col;
     if total_prefix_width <= cols {
         let _ = write!(
             buf,
             "{}{}{BOLD}{prefix_text}{RESET}",
-            bg(prefix_bg.0, prefix_bg.1, prefix_bg.2),
-            fg(255, 255, 255),
+            bg(prefix_bg),
+            fg(prefix_fg),
         );
         if show_mode {
             let _ = write!(
                 buf,
                 "{}{}{BOLD} {mode_text} {RESET}",
-                bg(mode_bg.0, mode_bg.1, mode_bg.2),
-                fg(30, 30, 46),
+                bg(mode_bg),
+                fg(theme.on(mode_bg)),
             );
         }
         col = total_prefix_width;
@@ -177,8 +177,8 @@ pub fn render_status_bar(state: &mut State, _rows: usize, cols: usize) {
         let _ = write!(
             buf,
             "{}{}{BOLD}{prefix_text}{RESET}",
-            bg(prefix_bg.0, prefix_bg.1, prefix_bg.2),
-            fg(255, 255, 255),
+            bg(prefix_bg),
+            fg(prefix_fg),
         );
         col = prefix_width;
     } else {
@@ -188,8 +188,8 @@ pub fn render_status_bar(state: &mut State, _rows: usize, cols: usize) {
         let _ = write!(
             buf,
             "{}{}{BOLD}{short}{RESET}",
-            bg(prefix_bg.0, prefix_bg.1, prefix_bg.2),
-            fg(255, 255, 255),
+            bg(prefix_bg),
+            fg(prefix_fg),
         );
         col = display_width(&short);
     }
@@ -201,12 +201,12 @@ pub fn render_status_bar(state: &mut State, _rows: usize, cols: usize) {
     if col < cols {
         match state.view_mode {
             ViewMode::Normal => {
-                render_tabs(state, &mut buf, &mut col, cols, last_prefix_bg, prefix_used);
+                render_tabs(state, &theme, &mut buf, &mut col, cols, last_prefix_bg, prefix_used);
             }
             ViewMode::Settings => {
-                arrow(&mut buf, &mut col, last_prefix_bg, BAR_BG);
+                arrow(&mut buf, &mut col, last_prefix_bg, theme.bar_bg);
                 let _ = write!(buf, "{bar_bg_str}");
-                render_settings_menu(state, &mut buf, &mut col);
+                render_settings_menu(state, &theme, &mut buf, &mut col);
             }
         }
     }
@@ -224,10 +224,11 @@ pub fn render_status_bar(state: &mut State, _rows: usize, cols: usize) {
 
 fn render_tabs(
     state: &mut State,
+    theme: &Theme,
     buf: &mut String,
     col: &mut usize,
     cols: usize,
-    prefix_bg: Color,
+    prefix_bg: Rgb,
     prefix_width: usize,
 ) {
     let now_s = unix_now();
@@ -239,7 +240,7 @@ fn render_tabs(
 
     let count = tabs.len();
     if count == 0 {
-        arrow(buf, col, prefix_bg, BAR_BG);
+        arrow(buf, col, prefix_bg, theme.bar_bg);
         return;
     }
 
@@ -330,34 +331,34 @@ fn render_tabs(
 
         // Pick tab background color
         let tab_bg = if is_flash_bright {
-            FLASH_BG_BRIGHT
+            theme.flash_bg
         } else if is_active {
-            TAB_BG_ACTIVE
+            theme.tab_active_bg
         } else {
-            TAB_BG_INACTIVE
+            theme.tab_inactive_bg
         };
 
         // Arrow: close previous segment, then open this tab
         if prev_bg == prefix_bg {
             arrow(buf, col, prev_bg, tab_bg);
         } else {
-            arrow(buf, col, prev_bg, BAR_BG);
-            arrow(buf, col, BAR_BG, tab_bg);
+            arrow(buf, col, prev_bg, theme.bar_bg);
+            arrow(buf, col, theme.bar_bg, tab_bg);
         }
 
-        let tab_bg_str = bg(tab_bg.0, tab_bg.1, tab_bg.2);
+        let tab_bg_str = bg(tab_bg);
         let region_start = *col;
 
         if is_claude {
             let s = session.unwrap();
-            let style = activity_style(&s.activity);
+            let style = activity_style(&s.activity, theme);
 
             let (sym_fg, name_fg, name_bold) = if is_flash_bright {
-                (fg(255, 255, 80), fg(255, 255, 80), true)
+                (fg(theme.flash_text), fg(theme.flash_text), true)
             } else if is_active {
-                (fg(style.r, style.g, style.b), fg(255, 255, 255), true)
+                (fg(style.color), fg(theme.text_active), true)
             } else {
-                (fg(style.r, style.g, style.b), fg(120, 220, 220), false)
+                (fg(style.color), fg(theme.text_inactive), false)
             };
 
             // Leading space
@@ -375,17 +376,19 @@ fn render_tabs(
                 *col += 1 + display_width(&truncated);
             }
 
-            // Elapsed suffix
+            // Elapsed suffix — on the tab background, so use the tab's matched
+            // base for contrast (text_dim pairs with the bar background).
             if let Some(ref es) = elapsed_strs[i] {
                 if *col + 1 + es.len() + 1 < cols {
-                    let _ = write!(buf, " {}{es}", fg(165, 160, 180));
+                    let elapsed_fg = if is_active { theme.text_active } else { theme.text_inactive };
+                    let _ = write!(buf, " {}{es}", fg(elapsed_fg));
                     *col += 1 + es.len();
                 }
             }
 
             // Fullscreen indicator
             if tab.is_fullscreen_active && *col + 3 < cols {
-                let _ = write!(buf, " {}F{RESET}{tab_bg_str}", fg(255, 200, 60));
+                let _ = write!(buf, " {}F{RESET}{tab_bg_str}", fg(theme.yellow));
                 *col += 2;
             }
 
@@ -410,9 +413,9 @@ fn render_tabs(
         } else {
             // Non-Claude tab: dimmer, no symbol
             let name_fg = if is_active {
-                fg(220, 215, 230)
+                fg(theme.text_active)
             } else {
-                fg(170, 165, 185)
+                fg(theme.text_inactive)
             };
             let name_bold = is_active;
 
@@ -429,7 +432,7 @@ fn render_tabs(
 
             // Fullscreen indicator
             if tab.is_fullscreen_active && *col + 3 < cols {
-                let _ = write!(buf, " {}F{RESET}{tab_bg_str}", fg(255, 200, 60));
+                let _ = write!(buf, " {}F{RESET}{tab_bg_str}", fg(theme.yellow));
                 *col += 2;
             }
 
@@ -451,28 +454,42 @@ fn render_tabs(
 
     // Arrow from last tab → bar background (only if we rendered any tabs)
     if prev_bg != prefix_bg || count > 0 {
-        arrow(buf, col, prev_bg, BAR_BG);
+        arrow(buf, col, prev_bg, theme.bar_bg);
     }
 }
 
-fn notify_mode_label(mode: NotifyMode) -> (&'static str, &'static str, String, String) {
-    match mode {
-        NotifyMode::Always => ("●", "Notify: always", fg(80, 200, 120), fg(255, 255, 255)),
-        NotifyMode::Unfocused => ("◐", "Notify: unfocused", fg(255, 200, 60), fg(255, 200, 60)),
-        NotifyMode::Never => ("○", "Notify: off", fg(100, 100, 100), fg(100, 100, 100)),
+/// Color for a setting's three states: on / partial / off.
+fn tristate_colors(theme: &Theme, level: u8) -> (&'static str, Rgb, Rgb) {
+    // Symbol color carries the state; label is always the bar's matched text
+    // color so it stays readable on the bar background.
+    match level {
+        2 => ("●", theme.green, theme.text_dim),
+        1 => ("◐", theme.yellow, theme.text_dim),
+        _ => ("○", theme.gray, theme.text_dim),
     }
 }
 
-fn flash_mode_label(mode: FlashMode) -> (&'static str, &'static str, String, String) {
-    match mode {
-        FlashMode::Persist => ("●", "Flash: persist", fg(80, 200, 120), fg(255, 255, 255)),
-        FlashMode::Once => ("◐", "Flash: brief", fg(255, 200, 60), fg(255, 200, 60)),
-        FlashMode::Off => ("○", "Flash: off", fg(100, 100, 100), fg(100, 100, 100)),
-    }
+fn notify_mode_label(mode: NotifyMode, theme: &Theme) -> (&'static str, &'static str, Rgb, Rgb) {
+    let (level, label) = match mode {
+        NotifyMode::Always => (2u8, "Notify: always"),
+        NotifyMode::Unfocused => (1, "Notify: unfocused"),
+        NotifyMode::Never => (0, "Notify: off"),
+    };
+    let (symbol, sym_color, label_color) = tristate_colors(theme, level);
+    (symbol, label, sym_color, label_color)
 }
 
-/// Render a three-state toggle and register its click region.
-/// Assumes the caller has already set the desired background color.
+fn flash_mode_label(mode: FlashMode, theme: &Theme) -> (&'static str, &'static str, Rgb, Rgb) {
+    let (level, label) = match mode {
+        FlashMode::Persist => (2u8, "Flash: persist"),
+        FlashMode::Once => (1, "Flash: brief"),
+        FlashMode::Off => (0, "Flash: off"),
+    };
+    let (symbol, sym_color, label_color) = tristate_colors(theme, level);
+    (symbol, label, sym_color, label_color)
+}
+
+/// Render a toggle and register its click region.
 fn render_tristate(
     buf: &mut String,
     col: &mut usize,
@@ -480,8 +497,8 @@ fn render_tristate(
     key: SettingKey,
     symbol: &str,
     label: &str,
-    sym_color: &str,
-    label_color: &str,
+    sym_color: Rgb,
+    label_color: Rgb,
 ) {
     let region_start = *col;
     let width = display_width(symbol) + 1 + label.len();
@@ -493,10 +510,10 @@ fn render_tristate(
         action: MenuAction::ToggleSetting(key),
     });
 
-    let _ = write!(buf, "{sym_color}{symbol} {label_color}{label}");
+    let _ = write!(buf, "{}{symbol} {}{label}", fg(sym_color), fg(label_color));
 }
 
-fn render_settings_menu(state: &mut State, buf: &mut String, col: &mut usize) {
+fn render_settings_menu(state: &mut State, theme: &Theme, buf: &mut String, col: &mut usize) {
     // Leading space after arrow
     let _ = write!(buf, " ");
     *col += 1;
@@ -504,10 +521,10 @@ fn render_settings_menu(state: &mut State, buf: &mut String, col: &mut usize) {
     // --- Notifications (three-state) ---
     {
         let (symbol, label, sym_color, label_color) =
-            notify_mode_label(state.settings.notifications);
+            notify_mode_label(state.settings.notifications, theme);
         render_tristate(
             buf, col, &mut state.menu_click_regions,
-            SettingKey::Notifications, symbol, label, &sym_color, &label_color,
+            SettingKey::Notifications, symbol, label, sym_color, label_color,
         );
     }
 
@@ -516,10 +533,10 @@ fn render_settings_menu(state: &mut State, buf: &mut String, col: &mut usize) {
         let _ = write!(buf, "  ");
         *col += 2;
         let (symbol, label, sym_color, label_color) =
-            flash_mode_label(state.settings.flash);
+            flash_mode_label(state.settings.flash, theme);
         render_tristate(
             buf, col, &mut state.menu_click_regions,
-            SettingKey::Flash, symbol, label, &sym_color, &label_color,
+            SettingKey::Flash, symbol, label, sym_color, label_color,
         );
     }
 
@@ -527,16 +544,12 @@ fn render_settings_menu(state: &mut State, buf: &mut String, col: &mut usize) {
     {
         let _ = write!(buf, "  ");
         *col += 2;
-        let enabled = state.settings.elapsed_time;
-        let (symbol, sym_color, label_color) = if enabled {
-            ("●", fg(80, 200, 120), fg(255, 255, 255))
-        } else {
-            ("○", fg(100, 100, 100), fg(100, 100, 100))
-        };
-        let label = if enabled { "Elapsed time: on" } else { "Elapsed time: off" };
+        let level = if state.settings.elapsed_time { 2 } else { 0 };
+        let (symbol, sym_color, label_color) = tristate_colors(theme, level);
+        let label = if state.settings.elapsed_time { "Elapsed time: on" } else { "Elapsed time: off" };
         render_tristate(
             buf, col, &mut state.menu_click_regions,
-            SettingKey::ElapsedTime, symbol, label, &sym_color, &label_color,
+            SettingKey::ElapsedTime, symbol, label, sym_color, label_color,
         );
     }
 
@@ -544,16 +557,12 @@ fn render_settings_menu(state: &mut State, buf: &mut String, col: &mut usize) {
     {
         let _ = write!(buf, "  ");
         *col += 2;
-        let enabled = state.settings.mode_indicator;
-        let (symbol, sym_color, label_color) = if enabled {
-            ("●", fg(80, 200, 120), fg(255, 255, 255))
-        } else {
-            ("○", fg(100, 100, 100), fg(100, 100, 100))
-        };
-        let label = if enabled { "Mode indicator: on" } else { "Mode indicator: off" };
+        let level = if state.settings.mode_indicator { 2 } else { 0 };
+        let (symbol, sym_color, label_color) = tristate_colors(theme, level);
+        let label = if state.settings.mode_indicator { "Mode indicator: on" } else { "Mode indicator: off" };
         render_tristate(
             buf, col, &mut state.menu_click_regions,
-            SettingKey::ModeIndicator, symbol, label, &sym_color, &label_color,
+            SettingKey::ModeIndicator, symbol, label, sym_color, label_color,
         );
     }
 
@@ -561,7 +570,7 @@ fn render_settings_menu(state: &mut State, buf: &mut String, col: &mut usize) {
     let _ = write!(buf, "  ");
     *col += 2;
     let close_start = *col;
-    let _ = write!(buf, "{}×", fg(255, 60, 60));
+    let _ = write!(buf, "{}×", fg(theme.red));
     *col += 1;
 
     state.menu_click_regions.push(MenuClickRegion {

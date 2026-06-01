@@ -166,4 +166,5 @@ pub struct State {
     pub menu_click_regions: Vec<MenuClickRegion>,
     pub config_loaded: bool,
     pub hooks_installed: bool,
+    pub theme: crate::theme::Theme,
 }
