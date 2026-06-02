@@ -53,11 +53,13 @@ impl ZellijPlugin for State {
                 self.active_tab_index = new_active;
                 self.tabs = tabs;
                 self.rebuild_pane_map();
+                self.refresh_focus();
                 true
             }
             Event::PaneUpdate(manifest) => {
                 self.pane_manifest = Some(manifest);
                 self.rebuild_pane_map();
+                self.refresh_focus();
                 true
             }
             Event::ModeUpdate(mode_info) => {
@@ -248,6 +250,38 @@ impl State {
             self.pane_to_tab = tab_pane_map::build_pane_to_tab_map(&self.tabs, manifest);
             self.refresh_session_tab_names();
             self.remove_dead_panes();
+        }
+    }
+
+    /// The focused terminal pane in the active tab, per the pane manifest.
+    fn focused_terminal_pane(&self) -> Option<u32> {
+        let manifest = self.pane_manifest.as_ref()?;
+        let active = self.active_tab_index?;
+        manifest
+            .panes
+            .get(&active)?
+            .iter()
+            .find(|p| p.is_focused && !p.is_plugin)
+            .map(|p| p.id)
+    }
+
+    /// Track which pane is focused, and reset the "waiting for your input"
+    /// flag on it: once you're looking at a pane, its ▶ has done its job.
+    /// Leaves Waiting (permission) alone — focusing isn't answering.
+    fn refresh_focus(&mut self) {
+        let focused = self.focused_terminal_pane();
+        self.focused_pane = focused;
+        if let Some(pane_id) = focused {
+            let is_prompting = self
+                .sessions
+                .get(&pane_id)
+                .is_some_and(|s| matches!(s.activity, state::Activity::Prompting));
+            if is_prompting {
+                if let Some(s) = self.sessions.get_mut(&pane_id) {
+                    s.activity = state::Activity::Idle;
+                }
+                self.flash_deadlines.remove(&pane_id);
+            }
         }
     }
 

@@ -165,4 +165,6 @@ pub struct State {
     pub config_loaded: bool,
     pub hooks_installed: bool,
     pub theme: crate::theme::Theme,
+    /// The terminal pane currently focused (in the active tab), if any.
+    pub focused_pane: Option<u32>,
 }

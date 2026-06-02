@@ -44,11 +44,21 @@ pub fn handle_hook_event(state: &mut State, payload: HookPayload) {
         _ => Activity::Idle,
     };
 
+    // If you're already looking at this pane, a "waiting for your input" needn't
+    // flag it — you're here. (Permission still flags; it is blocking.)
+    let on_focused_pane = state.focused_pane == Some(payload.pane_id);
+    let activity = if on_focused_pane && matches!(activity, Activity::Prompting) {
+        Activity::Idle
+    } else {
+        activity
+    };
+
     // Flash to draw attention when Claude needs you. Permission (Waiting) is the
     // loud case — the hook script also fires a desktop notification for it. A
     // Notification is the quieter "you've left me waiting" nudge: flash only,
-    // never a desktop notification. A plain Stop shows ▶ without flashing.
-    let should_flash = matches!(event, "PermissionRequest" | "Notification");
+    // never a desktop notification, and not while you're on the pane.
+    let should_flash = matches!(event, "PermissionRequest")
+        || (matches!(event, "Notification") && !on_focused_pane);
 
     let (tab_index, tab_name) = state
         .pane_to_tab
