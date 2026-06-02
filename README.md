@@ -28,9 +28,9 @@ A Zellij status bar plugin that replaces the default tab bar with Claude Code ac
 | $\color{#ffaa32}{⊜}$ | Spawning subagent |
 | $\color{#ffaa32}{◈}$ | Web search / fetch |
 | $\color{#ffaa32}{⚙}$ | Other tool |
-| $\color{#50c878}{▶}$ | Waiting for user prompt |
-| $\color{#ff3c3c}{⚠}$ | Waiting for permission |
-| $\color{#50c878}{✓}$ | Done |
+| $\color{#50c878}{▶}$ | Waiting for your input (Claude finished its turn) — pulses when Claude actively nudges you |
+| $\color{#ff3c3c}{⚠}$ | Waiting for your permission/answer |
+| $\color{#50c878}{✓}$ | Subagent finished |
 | $\color{#b4afc3}{○}$ | Idle |
 
 ### Settings

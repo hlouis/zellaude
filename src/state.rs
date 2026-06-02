@@ -24,10 +24,8 @@ pub enum Activity {
     Init,
     Thinking,
     Tool(String),
-    Prompting,
-    Waiting,
-    Notification,
-    Done,
+    Prompting, // waiting for your input (Claude finished its turn)
+    Waiting,   // waiting for your permission/answer
     AgentDone,
     Idle,
 }

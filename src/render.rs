@@ -13,14 +13,14 @@ struct Style {
 }
 
 fn activity_priority(activity: &Activity) -> u8 {
+    // "Needs you" states rank highest so a tab with any pane awaiting you
+    // surfaces over panes that are merely busy.
     match activity {
-        Activity::Waiting => 8,
-        Activity::Tool(_) => 7,
-        Activity::Thinking => 6,
-        Activity::Prompting => 5,
-        Activity::Notification => 4,
-        Activity::Init => 3,
-        Activity::Done => 2,
+        Activity::Waiting => 6,   // needs permission/answer
+        Activity::Prompting => 5, // your turn to type
+        Activity::Tool(_) => 4,
+        Activity::Thinking => 3,
+        Activity::Init => 2,
         Activity::AgentDone => 1,
         Activity::Idle => 0,
     }
@@ -44,8 +44,6 @@ fn activity_style(activity: &Activity, theme: &Theme) -> Style {
         }
         Activity::Prompting => Style { symbol: "▶", color: theme.green },
         Activity::Waiting => Style { symbol: "⚠", color: theme.red },
-        Activity::Notification => Style { symbol: "◇", color: theme.yellow },
-        Activity::Done => Style { symbol: "✓", color: theme.green },
         Activity::AgentDone => Style { symbol: "✓", color: theme.green },
         Activity::Idle => Style { symbol: "○", color: theme.gray },
     }

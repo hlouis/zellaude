@@ -269,14 +269,13 @@ impl State {
         let now = unix_now();
         let mut changed = false;
         for session in self.sessions.values_mut() {
-            match session.activity {
-                state::Activity::Done | state::Activity::AgentDone => {
-                    if now.saturating_sub(session.last_event_ts) >= DONE_TIMEOUT {
-                        session.activity = state::Activity::Idle;
-                        changed = true;
-                    }
-                }
-                _ => {}
+            // A finished subagent decays to Idle. Prompting (waiting for your
+            // input) is intentionally NOT decayed — it stays until you act.
+            if matches!(session.activity, state::Activity::AgentDone)
+                && now.saturating_sub(session.last_event_ts) >= DONE_TIMEOUT
+            {
+                session.activity = state::Activity::Idle;
+                changed = true;
             }
         }
         changed

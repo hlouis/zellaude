@@ -36,20 +36,19 @@ pub fn handle_hook_event(state: &mut State, payload: HookPayload) {
         "PostToolUse" | "PostToolUseFailure" => Activity::Thinking,
         "UserPromptSubmit" => Activity::Thinking,
         "PermissionRequest" => Activity::Waiting,
-        // Notification is informational — just refresh the timestamp, keep current activity.
-        "Notification" => {
-            if let Some(session) = state.sessions.get_mut(&payload.pane_id) {
-                session.last_event_ts = crate::state::unix_now();
-                if let Some(ts_ms) = payload.ts_ms {
-                    session.last_ts_ms = ts_ms;
-                }
-            }
-            return;
-        }
-        "Stop" => Activity::Done,
+        // Stop = the turn ended → it's your turn to type.
+        // Notification = Claude is actively waiting for your input (e.g. you've
+        // been idle). Both mean "waiting for you", shown as Prompting (▶).
+        "Stop" | "Notification" => Activity::Prompting,
         "SubagentStop" => Activity::AgentDone,
         _ => Activity::Idle,
     };
+
+    // Flash to draw attention when Claude needs you. Permission (Waiting) is the
+    // loud case — the hook script also fires a desktop notification for it. A
+    // Notification is the quieter "you've left me waiting" nudge: flash only,
+    // never a desktop notification. A plain Stop shows ▶ without flashing.
+    let should_flash = matches!(event, "PermissionRequest" | "Notification");
 
     let (tab_index, tab_name) = state
         .pane_to_tab
@@ -71,7 +70,7 @@ pub fn handle_hook_event(state: &mut State, payload: HookPayload) {
             last_ts_ms: 0,
         });
 
-    if matches!(activity, Activity::Waiting) {
+    if should_flash {
         match state.settings.flash {
             FlashMode::Once => {
                 state.flash_deadlines.insert(
@@ -84,8 +83,8 @@ pub fn handle_hook_event(state: &mut State, payload: HookPayload) {
             }
             FlashMode::Off => {}
         }
-        // Desktop notification is handled by the hook script to avoid
-        // duplicates from multiple plugin instances.
+        // Desktop notification (permission only) is handled by the hook script
+        // to avoid duplicates from multiple plugin instances.
     } else {
         state.flash_deadlines.remove(&payload.pane_id);
     }
