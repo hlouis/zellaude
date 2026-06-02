@@ -9,9 +9,11 @@ A Zellij status bar plugin that replaces the default tab bar with Claude Code ac
 - **Full tab bar** — shows all Zellij tabs (not just Claude sessions), replacing the native tab bar
 - **Session & mode display** — shows the Zellij session name and current input mode (NORMAL, LOCKED, PANE, etc.) with color-coded indicators
 - **Live activity indicators** — see what every Claude Code session is doing at a glance; non-Claude tabs shown dimly
+- **Waiting-for-input indicator** — when Claude finishes a turn and it's your move, the tab shows ▶; it clears the moment you focus that pane, so ▶ only flags sessions you haven't gotten to yet
+- **Theme-aware colors** — the bar follows your Zellij theme and switches automatically between dark and light
 - **Clickable tabs** — click any tab to switch to it
 - **Smart pane focus** — clicking a waiting (⚠) session focuses the exact pane so you can respond to the permission prompt immediately
-- **Permission flash** — sessions pulse bright yellow for 2 seconds when a permission request arrives
+- **Attention flash** — a tab pulses when a session needs you: a permission request, or Claude left waiting for your input (a quiet nudge once you've been idle)
 - **Desktop notifications** — macOS notification on permission requests (rate-limited to once per 10s per tab), with click-to-focus support via [terminal-notifier](https://github.com/julienXX/terminal-notifier)
 - **Elapsed time** — shows how long a session has been in its current state (after 30s), making it easy to spot stuck sessions
 - **Multi-instance sync** — all Zellij tabs show a unified view of all sessions
@@ -33,6 +35,8 @@ A Zellij status bar plugin that replaces the default tab bar with Claude Code ac
 | $\color{#50c878}{✓}$ | Subagent finished |
 | $\color{#b4afc3}{○}$ | Idle |
 
+Colors follow your active Zellij theme (including dark/light); the swatches above are the dark-theme defaults.
+
 ### Settings
 
 Click the **Zellaude** prefix on the left side of the bar to open the settings menu. Click it again (or the `×` button) to close. Settings are persisted to `~/.config/zellij/plugins/zellaude.json`.
@@ -40,14 +44,15 @@ Click the **Zellaude** prefix on the left side of the bar to open the settings m
 | Setting | Options | Default | Description |
 |---------|---------|---------|-------------|
 | Notifications | Always / Unfocused / Off | Always | Desktop notifications on permission requests. "Unfocused" only notifies when the requesting pane is on a different tab. |
-| Flash | Persist / Brief / Off | Brief | Yellow flash on permission requests. "Persist" keeps flashing until resolved, "Brief" flashes for 2 seconds. |
+| Flash | Persist / Brief / Off | Brief | Pulse when a session needs you (permission request, or Claude left waiting for input). "Persist" keeps pulsing until resolved, "Brief" pulses for ~2 seconds. |
 | Elapsed time | On / Off | On | Show time since last activity (appears after 30s). |
+| Mode indicator | On / Off | On | Show the current Zellij input mode (NORMAL, LOCKED, …) as a colored pill in the prefix. |
 
 ## Install
 
 ### Prerequisites
 
-- [Zellij](https://zellij.dev)
+- [Zellij](https://zellij.dev) 0.44+ — required for theme following / dark-light switching
 - [jq](https://jqlang.github.io/jq/) — used by the hook script at runtime
 
 ### Quick install
