@@ -14,6 +14,8 @@ pub fn handle_hook_event(state: &mut State, payload: HookPayload) {
     // SessionEnd → remove session (never drop: terminal cleanup)
     if event == "SessionEnd" {
         state.sessions.remove(&payload.pane_id);
+        state.flash_deadlines.remove(&payload.pane_id);
+        state.acked_panes.remove(&payload.pane_id);
         return;
     }
 
@@ -44,21 +46,32 @@ pub fn handle_hook_event(state: &mut State, payload: HookPayload) {
         _ => Activity::Idle,
     };
 
-    // If you're already looking at this pane, a "waiting for your input" needn't
-    // flag it — you're here. (Permission still flags; it is blocking.)
+    // Claude resumed work → a new turn began, so forget any prior acknowledgement.
+    // The next time this pane waits for you, it gets to flash again.
+    let resumed = matches!(
+        event,
+        "PreToolUse" | "PostToolUse" | "PostToolUseFailure" | "UserPromptSubmit" | "SessionStart"
+    );
+    if resumed {
+        state.acked_panes.remove(&payload.pane_id);
+    }
+
+    // "Needs you" is muted once acknowledged: either you're on the pane right
+    // now, or you already looked at it this waiting episode (acked_panes). A
+    // repeat Notification is the same nudge for the same wait — stay quiet.
+    // (Permission is blocking; it is never gated and always flags.)
     let on_focused_pane = state.focused_pane == Some(payload.pane_id);
-    let activity = if on_focused_pane && matches!(activity, Activity::Prompting) {
-        Activity::Idle
-    } else {
-        activity
-    };
+    let acked = state.acked_panes.contains(&payload.pane_id);
+    let was_prompting = matches!(activity, Activity::Prompting);
+    let suppressed = was_prompting && (on_focused_pane || acked);
+    let activity = if suppressed { Activity::Idle } else { activity };
 
     // Flash to draw attention when Claude needs you. Permission (Waiting) is the
     // loud case — the hook script also fires a desktop notification for it. A
     // Notification is the quieter "you've left me waiting" nudge: flash only,
-    // never a desktop notification, and not while you're on the pane.
+    // never a desktop notification, and not while you're on or have acked the pane.
     let should_flash = matches!(event, "PermissionRequest")
-        || (matches!(event, "Notification") && !on_focused_pane);
+        || (matches!(event, "Notification") && !on_focused_pane && !acked);
 
     let (tab_index, tab_name) = state
         .pane_to_tab
@@ -113,5 +126,14 @@ pub fn handle_hook_event(state: &mut State, payload: HookPayload) {
     if let Some((idx, name)) = tab_index.zip(tab_name) {
         session.tab_index = Some(idx);
         session.tab_name = Some(name);
+    }
+
+    // You're on this pane as it started waiting — a fresh acknowledgement.
+    // Remember it (so later background Notifications stay quiet) and tell the
+    // other instances, which got the same hook but lack accurate focus and may
+    // have set Prompting, to clear it so the bar agrees across tabs.
+    if was_prompting && on_focused_pane && !acked {
+        state.acked_panes.insert(payload.pane_id);
+        state.broadcast_ack(payload.pane_id);
     }
 }

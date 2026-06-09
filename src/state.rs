@@ -1,5 +1,5 @@
 use serde::{Deserialize, Serialize};
-use std::collections::{BTreeMap, HashMap};
+use std::collections::{BTreeMap, HashMap, HashSet};
 use std::time::{SystemTime, UNIX_EPOCH};
 use zellij_tile::prelude::*;
 
@@ -155,6 +155,11 @@ pub struct State {
     pub click_regions: Vec<ClickRegion>,
     /// pane_id -> flash deadline in ms (for waiting animation)
     pub flash_deadlines: HashMap<u32, u64>,
+    /// Panes whose current waiting episode you've already acknowledged (by
+    /// looking at them). Repeat "waiting for input" Notifications for these
+    /// stay quiet; cleared when Claude resumes work, so the next genuine
+    /// wait flashes again.
+    pub acked_panes: HashSet<u32>,
     pub zellij_session_name: Option<String>,
     pub term_program: Option<String>,
     pub input_mode: InputMode,

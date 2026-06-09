@@ -213,6 +213,16 @@ impl ZellijPlugin for State {
                 self.broadcast_sessions();
                 false
             }
+            "zellaude:ack" => {
+                // Another instance reports the user is looking at a pane —
+                // clear its ▶/flash here too so every instance agrees.
+                if let Some(ref payload) = pipe_message.payload {
+                    if let Ok(pane_id) = payload.trim().parse::<u32>() {
+                        return self.apply_ack(pane_id);
+                    }
+                }
+                false
+            }
             "zellaude:settings" => {
                 // Another instance broadcast new settings
                 if let Some(ref payload) = pipe_message.payload {
@@ -281,8 +291,42 @@ impl State {
                     s.activity = state::Activity::Idle;
                 }
                 self.flash_deadlines.remove(&pane_id);
+                // Remember you looked, so repeat Notifications for this waiting
+                // episode stay quiet until Claude does real work again.
+                self.acked_panes.insert(pane_id);
+                // Tell the other instances — they render this tab when active
+                // and won't have seen the focus locally.
+                self.broadcast_ack(pane_id);
             }
         }
+    }
+
+    /// Broadcast "the user is looking at this pane" so every instance clears
+    /// its ▶/flash for it. The focus reset is otherwise local to whichever
+    /// instance owns the active tab, so a different instance rendering the bar
+    /// would still show the stale ▶.
+    fn broadcast_ack(&self, pane_id: u32) {
+        let mut msg = MessageToPlugin::new("zellaude:ack");
+        msg.message_payload = Some(pane_id.to_string());
+        pipe_message_to_plugin(msg);
+    }
+
+    /// Clear a pane's ▶/flash because the user looked at it. Idempotent.
+    fn apply_ack(&mut self, pane_id: u32) -> bool {
+        // Mirror the focusing instance's acknowledgement locally so repeat
+        // Notifications stay quiet in this instance too.
+        self.acked_panes.insert(pane_id);
+        let mut changed = false;
+        if let Some(s) = self.sessions.get_mut(&pane_id) {
+            if matches!(s.activity, state::Activity::Prompting) {
+                s.activity = state::Activity::Idle;
+                changed = true;
+            }
+        }
+        if self.flash_deadlines.remove(&pane_id).is_some() {
+            changed = true;
+        }
+        changed
     }
 
     fn refresh_session_tab_names(&mut self) {
@@ -297,6 +341,8 @@ impl State {
     fn remove_dead_panes(&mut self) {
         self.sessions
             .retain(|pane_id, _| self.pane_to_tab.contains_key(pane_id));
+        let live = &self.pane_to_tab;
+        self.acked_panes.retain(|pane_id| live.contains_key(pane_id));
     }
 
     fn cleanup_stale_sessions(&mut self) -> bool {
