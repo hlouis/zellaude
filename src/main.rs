@@ -233,6 +233,21 @@ impl ZellijPlugin for State {
                 }
                 false
             }
+            "zellaude:dump" => {
+                // Debug: each instance writes its own state to stderr, which
+                // Zellij captures into its log (auto-tagged with the plugin id).
+                // We can't write to the invoking terminal's stdout: a CLI pipe
+                // broadcasts to EVERY instance, and N writers on one pipe make
+                // cli_pipe_output race and loop ("1000 unknown messages, logging
+                // client out"). stderr→log is the robust path for N instances.
+                self.dump_state();
+                // CLI pipes block by default — unblock so `zellij pipe` returns
+                // immediately instead of hanging to a 1s timeout.
+                if let PipeSource::Cli(ref input_pipe_id) = pipe_message.source {
+                    unblock_cli_pipe_input(input_pipe_id);
+                }
+                false
+            }
             "zellaude:sync" => {
                 // Another instance sharing state — merge it
                 if let Some(ref payload) = pipe_message.payload {
@@ -412,6 +427,32 @@ impl State {
         msg.message_payload =
             Some(serde_json::to_string(&self.settings).unwrap_or_default());
         pipe_message_to_plugin(msg);
+    }
+
+    /// Debug snapshot: write this instance's internal state to stderr as one
+    /// compact JSON line (Zellij captures it into its log, tagged `[id: N]`).
+    /// One line per instance — that exposes any per-instance divergence in
+    /// focused_pane / acked_panes / flash_deadlines. Trigger with
+    /// `zellij pipe --name zellaude:dump`, then read it back from the log:
+    ///   grep zellaude-dump <log> | sed 's/.*zellaude-dump //' | jq -s .
+    fn dump_state(&self) {
+        let dump = serde_json::json!({
+            "plugin_id": get_plugin_ids().plugin_id,
+            "now_ms": unix_now_ms(),
+            "active_tab_index": self.active_tab_index,
+            "focused_pane": self.focused_pane,
+            "config_loaded": self.config_loaded,
+            "hooks_installed": self.hooks_installed,
+            "settings": self.settings,
+            "sessions": self.sessions,
+            // raw deadline; compare against now_ms (u64::MAX == FlashMode::Persist)
+            "flash_deadlines": self.flash_deadlines,
+            "acked_panes": self.acked_panes,
+            "pane_to_tab": self.pane_to_tab,
+        });
+        // compact (single line) so each instance is one greppable log entry
+        let json = serde_json::to_string(&dump).unwrap_or_default();
+        eprintln!("zellaude-dump {json}");
     }
 
     fn load_config(&self) {

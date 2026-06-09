@@ -40,6 +40,7 @@ Claude Code hook → zellaude-hook.sh → `zellij pipe` → plugin.pipe() → St
 - `src/installer.rs` — generates and runs the self-install shell command (writes the hook script, registers hooks in `settings.json`).
 - `scripts/zellaude-hook.sh` — the hook bridge. Embedded into the binary via `include_str!` and written to disk at runtime. Also owns the desktop-notification logic (rate-limited, focus-aware) so notifications fire once regardless of how many plugin instances exist.
 - `scripts/install-hooks.sh` — standalone hook registration (used by `install.sh`); mirrors the logic in `installer.rs`.
+- `scripts/zellaude-dump.sh` — debug helper: triggers the `zellaude:dump` pipe and reads each instance's state snapshot back from the Zellij log (see Debugging).
 
 ### Key mechanisms
 
@@ -62,6 +63,16 @@ Claude Code hook → zellaude-hook.sh → `zellij pipe` → plugin.pipe() → St
 **Rendering.** `render.rs` writes ANSI manually. Width accounting is explicit: every byte written must advance `col`, and the bar must never exceed `cols` (overflow clips, never scrolls — note the `\x1b[?7l` no-wrap escape). Colors are truecolor `\x1b[38;2;r;g;bm`, all sourced from `Theme` (see `theme.rs`) — never add color literals to `render.rs`. Click regions (`click_regions`, `menu_click_regions`, `prefix_click_region`) are rebuilt every render and consumed by the `Mouse::LeftClick` handler in `main.rs` — column ranges must stay in sync with what was drawn.
 
 **Theming.** All colors follow the active Zellij theme by mapping Zellij's `Styling` semantic slots onto the bar: tab backgrounds ← `ribbon_selected/unselected`, bar background & accents ← `text_unselected` (`emphasis_0..3`), waiting/done ← `exit_code_error/success`. Zellij's `Styling` exposes ~6 distinct accent hues but no yellow; the one hue the bar needs and Zellij doesn't provide (yellow, for notifications) is **synthesized** via `with_hue()` — CSS-`hsl()`-style: take the theme's orange, keep its saturation/lightness, force the hue to yellow. So derived colors still adapt to dark/light. This requires Zellij ≥ 0.44 (where dark/light theme switching and the needed plugin API landed) — `zellij-tile` is pinned to 0.44.x for this reason.
+
+## Debugging
+
+**State dump.** Run `./scripts/zellaude-dump.sh` to print every running instance's internal state as a JSON array (one object per tab instance, deduped by `plugin_id`, newest kept). Mechanism: the script sends the `zellaude:dump` CLI pipe; each instance handles it in `pipe()` by writing one compact-JSON line to **stderr**, which Zellij captures into its log (`$TMPDIR/zellij-*/zellij-log/zellij.log`, auto-tagged `[id: N]`). The script greps those lines back out and pretty-prints them. Reach for this when chasing per-instance divergence (focus/ack/flash live in each instance separately).
+
+Why stderr→log and **not** stdout via `cli_pipe_output`: a CLI pipe broadcasts to *every* instance, so N writers hammer one pipe — Zellij then kills the client with "1000 consecutive unknown messages … logging client out" and nothing reaches the terminal. stderr→log is the only robust channel for the one-instance-per-tab model. The `pipe()` handler still calls `unblock_cli_pipe_input` (by the `PipeSource::Cli` pipe id) so `zellij pipe` returns immediately instead of hanging to a 1s timeout.
+
+Fields to read first for the "tab flashes forever" class of bug: `flash_deadlines` (compare each to `now_ms`; `18446744073709551615` == `u64::MAX` == `FlashMode::Persist`, never expires), `sessions[].activity` (`Waiting` is *not* cleared by focusing — only `Prompting` is), and whether `acked_panes` / `focused_pane` agree across instances.
+
+`eprintln!` anywhere in the plugin lands in the same Zellij log — the general-purpose trace channel. There is no plugin stdout to the terminal; rendering owns the bar's screen region.
 
 ## Versioning
 
