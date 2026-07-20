@@ -5,6 +5,7 @@ use crate::state::{
 use crate::theme::{Rgb, Theme};
 use std::cmp::Reverse;
 use std::fmt::Write;
+use unicode_width::{UnicodeWidthChar, UnicodeWidthStr};
 use std::io::Write as IoWrite;
 use zellij_tile::prelude::{InputMode, TabInfo};
 
@@ -58,8 +59,40 @@ fn bg((r, g, b): Rgb) -> String {
     format!("\x1b[48;2;{r};{g};{b}m")
 }
 
+/// Terminal columns a string occupies — not its char count.
+///
+/// CJK tab names and the ⚡ tool symbol are double-width, so counting chars
+/// under-reports and the bar silently overruns `cols` (it clips rather than
+/// wraps, so the rightmost tabs vanish early). Ambiguous-width characters are
+/// treated as narrow, matching a non-CJK terminal; a terminal configured to
+/// render them wide would still drift.
 fn display_width(s: &str) -> usize {
-    s.chars().count()
+    UnicodeWidthStr::width(s)
+}
+
+/// Cut `s` down to at most `max_cols` terminal columns, ending in … if cut.
+/// Never splits a double-width char across the boundary — it stops short and
+/// leaves the column unused rather than emitting half a glyph.
+fn truncate_to_width(s: &str, max_cols: usize) -> String {
+    if max_cols == 0 {
+        return String::new();
+    }
+    if display_width(s) <= max_cols {
+        return s.to_string();
+    }
+    let budget = max_cols.saturating_sub(1); // one column for the …
+    let mut out = String::new();
+    let mut w = 0;
+    for c in s.chars() {
+        let cw = UnicodeWidthChar::width(c).unwrap_or(0);
+        if w + cw > budget {
+            break;
+        }
+        out.push(c);
+        w += cw;
+    }
+    out.push('…');
+    out
 }
 
 const RESET: &str = "\x1b[0m";
@@ -310,7 +343,11 @@ fn render_tabs(
             if v.is_empty() {
                 2
             } else {
-                3 + v.len() + usize::from(*overflow)
+                let icons_w: usize = v
+                    .iter()
+                    .map(|s| display_width(activity_style(&s.activity, theme).symbol))
+                    .sum();
+                3 + icons_w + usize::from(*overflow)
             }
         })
         .sum();
@@ -334,16 +371,8 @@ fn render_tabs(
         let is_claude = !icons.is_empty();
         let tab_name = &tab.name;
 
-        // Truncate name
-        let char_count = tab_name.chars().count();
-        let truncated = if max_name_len == 0 {
-            String::new()
-        } else if char_count > max_name_len {
-            let s: String = tab_name.chars().take(max_name_len.saturating_sub(1)).collect();
-            format!("{s}…")
-        } else {
-            tab_name.to_string()
-        };
+        // Truncate name to the column budget (not a char count — see display_width)
+        let truncated = truncate_to_width(tab_name, max_name_len);
 
         // Check flash for any session in this tab
         let is_flash_bright = state
