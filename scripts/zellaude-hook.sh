@@ -100,8 +100,11 @@ if [ "$HOOK_EVENT" = "PermissionRequest" ]; then
     TITLE="⚠ Claude Code"
     MESSAGE="Permission requested${TOOL_SUFFIX}"
 
-    # Rate-limit: one notification per pane per 10 seconds
-    LOCK="/tmp/zellaude-notify-${ZELLIJ_PANE_ID}"
+    # Rate-limit: one notification per pane per 10 seconds.
+    # Pane ids are per-session, so the lock must be session-qualified —
+    # otherwise pane 5 in two sessions would share a lock and silently
+    # swallow each other's permission notifications.
+    LOCK="/tmp/zellaude-notify-${ZELLIJ_SESSION_NAME//[^a-zA-Z0-9_-]/_}-${ZELLIJ_PANE_ID}"
     NOW=$(date +%s)
     LAST=0
     [ -f "$LOCK" ] && LAST=$(cat "$LOCK" 2>/dev/null)
