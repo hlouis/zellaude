@@ -449,6 +449,9 @@ impl State {
             "flash_deadlines": self.flash_deadlines,
             "acked_panes": self.acked_panes,
             "pane_to_tab": self.pane_to_tab,
+            // Colors as derived from Zellij's Styling — the only way to see what
+            // the bar is actually painting when a theme reads badly.
+            "theme": self.theme.dump(),
         });
         // compact (single line) so each instance is one greppable log entry
         let json = serde_json::to_string(&dump).unwrap_or_default();

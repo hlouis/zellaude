@@ -203,3 +203,27 @@ impl Default for Theme {
         Self::fallback()
     }
 }
+
+impl Theme {
+    /// Every slot as "#rrggbb", for the `zellaude:dump` debug channel.
+    pub fn dump(&self) -> serde_json::Value {
+        let h = |(r, g, b): Rgb| format!("#{r:02x}{g:02x}{b:02x}");
+        serde_json::json!({
+            "bar_bg": h(self.bar_bg),
+            "prefix_bg": h(self.prefix_bg),
+            "tab_active_bg": h(self.tab_active_bg),
+            "tab_inactive_bg": h(self.tab_inactive_bg),
+            "flash_bg": h(self.flash_bg),
+            "text_active": h(self.text_active),
+            "text_inactive": h(self.text_inactive),
+            "text_dim": h(self.text_dim),
+            "green": h(self.green),
+            "red": h(self.red),
+            "orange": h(self.orange),
+            "yellow": h(self.yellow),
+            "cyan": h(self.cyan),
+            "purple": h(self.purple),
+            "gray": h(self.gray),
+        })
+    }
+}
