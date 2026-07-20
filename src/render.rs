@@ -356,6 +356,8 @@ fn render_tabs(
             }
         })
         .sum();
+    // Arrows: 1 for the first tab, 2 for each later one, 1 closing back to the
+    // bar background — exactly 2 * count.
     let overhead = prefix_width + 2 * count + per_tab_overhead + total_elapsed_width;
     let max_name_len = if overhead < cols {
         ((cols - overhead) / count).min(20)
@@ -366,8 +368,9 @@ fn render_tabs(
     let mut prev_bg = prefix_bg;
 
     for (i, tab) in tabs.iter().enumerate() {
-        // Stop if we'd overflow — need room for at least arrow + closing arrow
-        let arrows_needed = if prev_bg == prefix_bg { 1 } else { 2 };
+        // Stop if we'd overflow — need room for this tab's arrow(s) plus the
+        // closing arrow back to the bar background.
+        let arrows_needed = if i == 0 { 1 } else { 2 };
         if *col + arrows_needed + 3 > cols {
             break;
         }
@@ -403,8 +406,15 @@ fn render_tabs(
             theme.tab_inactive_bg
         };
 
-        // Arrow: close previous segment, then open this tab
-        if prev_bg == prefix_bg {
+        // First tab sits flush against the prefix; every later tab is preceded
+        // by a blank column (arrow out to the bar background, then back in).
+        //
+        // This keys off the tab's position, not its color. The old test was
+        // `prev_bg == prefix_bg`, meant as "is this the first tab" — but
+        // tab_inactive_bg and prefix_bg are both ribbon_unselected, i.e. the
+        // same color, so it really asked "did an inactive tab precede me" and
+        // the blank column landed after active tabs instead.
+        if i == 0 {
             arrow(buf, col, prev_bg, tab_bg);
         } else {
             arrow(buf, col, prev_bg, theme.bar_bg);
