@@ -133,6 +133,67 @@ fn with_hue(accent: Rgb, hue: f32) -> Rgb {
     hsl_to_rgb(hue, s.max(0.55), l)
 }
 
+/// Keep an accent's hue but force its lightness to read against `bg`.
+///
+/// The accents come from Zellij's `text_unselected` slots, which are tuned for
+/// the bar background (`bar_bg` *is* `text_unselected.background`). Icons are
+/// drawn on the ribbon backgrounds instead, so on a theme whose ribbons are
+/// light, a light accent lands on a light tab and disappears. Unlike `on()`
+/// this preserves the hue — the color coding is the whole point of the icons.
+///
+/// Saturation gets a floor because pushing lightness toward an extreme washes
+/// hues out, and the hues have to stay distinguishable from each other.
+///
+/// Lightness is walked away from the background until the *measured* contrast
+/// clears `MIN_CONTRAST`, rather than being clamped to a fixed band: lightness
+/// is a poor proxy for contrast across hues (a fully-lit red carries far less
+/// luminance than a fully-lit yellow, so one band can't serve both). An accent
+/// that already reads is returned untouched.
+pub fn readable(accent: Rgb, bg: Rgb) -> Rgb {
+    const MIN_CONTRAST: f32 = 3.0; // WCAG 2.1 non-text minimum
+    let (h, s, l) = rgb_to_hsl(accent);
+    let s = s.max(0.5);
+    let toward_light = lum(bg) <= 140;
+
+    let mut candidate = hsl_to_rgb(h, s, l);
+    let mut step = 0.0;
+    while step <= 1.0 {
+        let cl = if toward_light {
+            (l + step).min(0.97)
+        } else {
+            (l - step).max(0.03)
+        };
+        candidate = hsl_to_rgb(h, s, cl);
+        if contrast(candidate, bg) >= MIN_CONTRAST {
+            break;
+        }
+        step += 0.04;
+    }
+    candidate
+}
+
+/// WCAG relative luminance. Distinct from `lum()`, which is the cheap
+/// perceived-brightness approximation used only to ask "is this background
+/// light or dark".
+fn rel_lum((r, g, b): Rgb) -> f32 {
+    fn ch(v: u8) -> f32 {
+        let v = v as f32 / 255.0;
+        if v <= 0.03928 {
+            v / 12.92
+        } else {
+            ((v + 0.055) / 1.055).powf(2.4)
+        }
+    }
+    0.2126 * ch(r) + 0.7152 * ch(g) + 0.0722 * ch(b)
+}
+
+/// WCAG contrast ratio, 1.0 (identical) to 21.0 (black on white).
+fn contrast(a: Rgb, b: Rgb) -> f32 {
+    let (x, y) = (rel_lum(a), rel_lum(b));
+    let (hi, lo) = if x > y { (x, y) } else { (y, x) };
+    (hi + 0.05) / (lo + 0.05)
+}
+
 impl Theme {
     /// A near-black or near-white that is guaranteed readable on `bg` — used
     /// for text drawn on a colored accent pill (e.g. the mode indicator), where

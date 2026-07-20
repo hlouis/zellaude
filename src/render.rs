@@ -2,7 +2,7 @@ use crate::state::{
     unix_now, unix_now_ms, Activity, ClickRegion, FlashMode, MenuAction, MenuClickRegion,
     NotifyMode, SessionInfo, SettingKey, State, ViewMode,
 };
-use crate::theme::{Rgb, Theme};
+use crate::theme::{readable, Rgb, Theme};
 use std::cmp::Reverse;
 use std::fmt::Write;
 use unicode_width::{UnicodeWidthChar, UnicodeWidthStr};
@@ -448,7 +448,9 @@ fn render_tabs(
                 let sym_fg = if is_flash_bright {
                     fg(theme.flash_text)
                 } else {
-                    fg(style.color)
+                    // Accents are tuned for the bar background; retune to the
+                    // tab's, or a light-ribbon theme swallows them.
+                    fg(readable(style.color, tab_bg))
                 };
                 let _ = write!(buf, "{sym_fg}{}", style.symbol);
                 *col += display_width(style.symbol);
@@ -480,7 +482,7 @@ fn render_tabs(
 
             // Fullscreen indicator
             if tab.is_fullscreen_active && *col + 3 < cols {
-                let _ = write!(buf, " {}F{RESET}{tab_bg_str}", fg(theme.yellow));
+                let _ = write!(buf, " {}F{RESET}{tab_bg_str}", fg(readable(theme.yellow, tab_bg)));
                 *col += 2;
             }
 
@@ -524,7 +526,7 @@ fn render_tabs(
 
             // Fullscreen indicator
             if tab.is_fullscreen_active && *col + 3 < cols {
-                let _ = write!(buf, " {}F{RESET}{tab_bg_str}", fg(theme.yellow));
+                let _ = write!(buf, " {}F{RESET}{tab_bg_str}", fg(readable(theme.yellow, tab_bg)));
                 *col += 2;
             }
 
