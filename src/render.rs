@@ -35,7 +35,12 @@ fn activity_style(activity: &Activity, theme: &Theme) -> Style {
         Activity::Thinking => Style { symbol: "●", color: theme.purple },
         Activity::Tool(name) => {
             let symbol = match name.as_str() {
-                "Bash" => "⚡",
+                // Every status symbol must occupy exactly one terminal column,
+                // or a session flipping between states makes its tab grow and
+                // shrink, shifting every tab to its right. ⚡ (U+26A1) was the
+                // lone offender: Emoji_Presentation=Yes and EAW=Wide, so it is
+                // two columns everywhere. ❖ is single-column.
+                "Bash" => "❖",
                 "Read" | "Glob" | "Grep" => "◉",
                 "Edit" | "Write" => "✎",
                 "Task" => "⊜",
