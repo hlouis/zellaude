@@ -3,6 +3,7 @@ use crate::state::{
     NotifyMode, SessionInfo, SettingKey, State, ViewMode,
 };
 use crate::theme::{Rgb, Theme};
+use std::cmp::Reverse;
 use std::fmt::Write;
 use std::io::Write as IoWrite;
 use zellij_tile::prelude::{InputMode, TabInfo};
@@ -64,6 +65,9 @@ fn display_width(s: &str) -> usize {
 const RESET: &str = "\x1b[0m";
 const BOLD: &str = "\x1b[1m";
 const ELAPSED_THRESHOLD: u64 = 30;
+/// Most status icons drawn per tab; beyond this the least urgent are collapsed
+/// into a single ellipsis so a busy tab can't starve every tab name of width.
+const MAX_ICONS: usize = 4;
 const SEPARATOR: &str = "\u{e0b0}";
 
 /// Write a powerline arrow: fg=from_bg, bg=to_bg, then separator char.
@@ -242,16 +246,36 @@ fn render_tabs(
         return;
     }
 
-    // For each tab, find the best (highest-priority) Claude session
-    let best_sessions: Vec<Option<&SessionInfo>> = tabs
+    // Every Claude session in each tab, as (icons to draw, some were dropped).
+    //
+    // Selection and display use different orders on purpose: we keep the
+    // MAX_ICONS most *urgent* sessions, but draw them in pane_id order. Picking
+    // by pane_id would hide a ⚠ sitting on the 5th pane; drawing by priority
+    // would make icons jump around as states change. Sorts are stable and the
+    // BTreeMap yields pane_id order, so ties stay deterministic.
+    let tab_sessions: Vec<(Vec<&SessionInfo>, bool)> = tabs
         .iter()
         .map(|tab| {
-            state
+            let mut v: Vec<&SessionInfo> = state
                 .sessions
                 .values()
                 .filter(|s| s.tab_index == Some(tab.position))
-                .max_by_key(|s| activity_priority(&s.activity))
+                .collect();
+            let overflow = v.len() > MAX_ICONS;
+            if overflow {
+                v.sort_by_key(|s| Reverse(activity_priority(&s.activity)));
+                v.truncate(MAX_ICONS);
+            }
+            v.sort_by_key(|s| s.pane_id);
+            (v, overflow)
         })
+        .collect();
+
+    // The tab's headline session — highest priority, drives elapsed time.
+    // Truncation above keeps the top-K by priority, so this is unaffected by it.
+    let best_sessions: Vec<Option<&SessionInfo>> = tab_sessions
+        .iter()
+        .map(|(v, _)| v.iter().copied().max_by_key(|s| activity_priority(&s.activity)))
         .collect();
 
     // Pre-compute elapsed strings (only for Claude tabs)
@@ -277,9 +301,18 @@ fn render_tabs(
         .iter()
         .map(|e: &Option<String>| e.as_ref().map_or(0, |s| s.len() + 1))
         .sum();
-    let per_tab_overhead: usize = best_sessions
+    // Claude tabs: leading space + trailing space + space before name, plus one
+    // column per icon and one for the overflow ellipsis. (The old constant 4 was
+    // this same formula with exactly one icon.)
+    let per_tab_overhead: usize = tab_sessions
         .iter()
-        .map(|s: &Option<&SessionInfo>| if s.is_some() { 4 } else { 2 })
+        .map(|(v, overflow)| {
+            if v.is_empty() {
+                2
+            } else {
+                3 + v.len() + usize::from(*overflow)
+            }
+        })
         .sum();
     let overhead = prefix_width + 2 * count + per_tab_overhead + total_elapsed_width;
     let max_name_len = if overhead < cols {
@@ -297,8 +330,8 @@ fn render_tabs(
             break;
         }
 
-        let session = best_sessions[i];
-        let is_claude = session.is_some();
+        let (icons, icons_overflow) = &tab_sessions[i];
+        let is_claude = !icons.is_empty();
         let tab_name = &tab.name;
 
         // Truncate name
@@ -348,24 +381,41 @@ fn render_tabs(
         let region_start = *col;
 
         if is_claude {
-            let s = session.unwrap();
-            let style = activity_style(&s.activity, theme);
-
-            let (sym_fg, name_fg, name_bold) = if is_flash_bright {
-                (fg(theme.flash_text), fg(theme.flash_text), true)
+            let (name_fg, name_bold) = if is_flash_bright {
+                (fg(theme.flash_text), true)
             } else if is_active {
-                (fg(style.color), fg(theme.text_active), true)
+                (fg(theme.text_active), true)
             } else {
-                (fg(style.color), fg(theme.text_inactive), false)
+                (fg(theme.text_inactive), false)
             };
 
             // Leading space
             let _ = write!(buf, "{tab_bg_str} ");
             *col += 1;
 
-            // Symbol
-            let _ = write!(buf, "{sym_fg}{}", style.symbol);
-            *col += display_width(style.symbol);
+            // One symbol per session in this tab. No separator between them:
+            // each carries its own color, and they read as one cluster — the
+            // tab's state. A space each would cost n-1 columns for nothing.
+            for s in icons {
+                if *col + 2 > cols {
+                    break;
+                }
+                let style = activity_style(&s.activity, theme);
+                let sym_fg = if is_flash_bright {
+                    fg(theme.flash_text)
+                } else {
+                    fg(style.color)
+                };
+                let _ = write!(buf, "{sym_fg}{}", style.symbol);
+                *col += display_width(style.symbol);
+            }
+
+            // Overflow marker — reuses the name-truncation vocabulary and costs
+            // one column, where a "+N" would cost as much as just drawing them.
+            if *icons_overflow && *col + 2 <= cols {
+                let _ = write!(buf, "{}…", fg(theme.text_inactive));
+                *col += 1;
+            }
 
             // Space + name
             if !truncated.is_empty() {
