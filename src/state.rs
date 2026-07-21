@@ -149,6 +149,9 @@ pub struct MenuClickRegion {
 pub struct State {
     pub sessions: BTreeMap<u32, SessionInfo>,
     pub pane_to_tab: HashMap<u32, (usize, String)>,
+    /// pane_id -> (x, y) screen position, so status icons follow the panes'
+    /// physical left-to-right order instead of pane_id (creation) order.
+    pub pane_pos: HashMap<u32, (usize, usize)>,
     pub tabs: Vec<TabInfo>,
     pub pane_manifest: Option<PaneManifest>,
     pub active_tab_index: Option<usize>,

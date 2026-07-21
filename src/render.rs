@@ -287,10 +287,12 @@ fn render_tabs(
     // Every Claude session in each tab, as (icons to draw, some were dropped).
     //
     // Selection and display use different orders on purpose: we keep the
-    // MAX_ICONS most *urgent* sessions, but draw them in pane_id order. Picking
-    // by pane_id would hide a ⚠ sitting on the 5th pane; drawing by priority
-    // would make icons jump around as states change. Sorts are stable and the
-    // BTreeMap yields pane_id order, so ties stay deterministic.
+    // MAX_ICONS most *urgent* sessions (so a ⚠ is never the one dropped), but
+    // draw them left-to-right in the panes' physical screen order — x first,
+    // then y for stacked panes — so an icon's position mirrors its pane. pane_id
+    // is the final tiebreaker for determinism, and the fallback for any pane not
+    // yet in the manifest (unknown position sorts last).
+    let pane_pos = &state.pane_pos;
     let tab_sessions: Vec<(Vec<&SessionInfo>, bool)> = tabs
         .iter()
         .map(|tab| {
@@ -304,7 +306,13 @@ fn render_tabs(
                 v.sort_by_key(|s| Reverse(activity_priority(&s.activity)));
                 v.truncate(MAX_ICONS);
             }
-            v.sort_by_key(|s| s.pane_id);
+            v.sort_by_key(|s| {
+                let (x, y) = pane_pos
+                    .get(&s.pane_id)
+                    .copied()
+                    .unwrap_or((usize::MAX, usize::MAX));
+                (x, y, s.pane_id)
+            });
             (v, overflow)
         })
         .collect();

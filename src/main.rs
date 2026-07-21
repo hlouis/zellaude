@@ -272,7 +272,10 @@ impl ZellijPlugin for State {
 impl State {
     fn rebuild_pane_map(&mut self) {
         if let Some(ref manifest) = self.pane_manifest {
-            self.pane_to_tab = tab_pane_map::build_pane_to_tab_map(&self.tabs, manifest);
+            let (pane_to_tab, pane_pos) =
+                tab_pane_map::build_pane_to_tab_map(&self.tabs, manifest);
+            self.pane_to_tab = pane_to_tab;
+            self.pane_pos = pane_pos;
             self.refresh_session_tab_names();
             self.remove_dead_panes();
         }
@@ -449,6 +452,8 @@ impl State {
             "flash_deadlines": self.flash_deadlines,
             "acked_panes": self.acked_panes,
             "pane_to_tab": self.pane_to_tab,
+            // pane_id -> [x, y]; icon draw order sorts by this.
+            "pane_pos": self.pane_pos,
             // Colors as derived from Zellij's Styling — the only way to see what
             // the bar is actually painting when a theme reads badly.
             "theme": self.theme.dump(),
