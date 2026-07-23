@@ -45,9 +45,36 @@ PAYLOAD=$(jq -nc \
     ts_ms: ($ts_ms | tonumber)
   }')
 
-# Permission request: bell + desktop notification
-if [ "$HOOK_EVENT" = "PermissionRequest" ]; then
-  printf '\a' > /dev/tty 2>/dev/null || true
+# Desktop notification for events that need your attention.
+# Which events notify — and their message — is decided here; everything
+# below (focus check, rate-limit, delivery) is shared, no per-event branches.
+#   PermissionRequest → blocking, loud (bell)
+#   Stop              → main turn ended: work done / Claude is waiting on you
+#                       (Claude Code can't tell "asking a question" from "finished")
+#   SubagentStop      → a subagent/Task finished
+NOTIFY_TITLE=""
+NOTIFY_MESSAGE=""
+BELL=false
+case "$HOOK_EVENT" in
+  PermissionRequest)
+    BELL=true
+    TOOL_SUFFIX=""
+    [ -n "$TOOL_NAME" ] && TOOL_SUFFIX=" — $TOOL_NAME"
+    NOTIFY_TITLE="⚠ Claude Code"
+    NOTIFY_MESSAGE="Permission requested${TOOL_SUFFIX}"
+    ;;
+  Stop)
+    NOTIFY_TITLE="✅ Claude Code"
+    NOTIFY_MESSAGE="Done — your turn"
+    ;;
+  SubagentStop)
+    NOTIFY_TITLE="✅ Claude Code"
+    NOTIFY_MESSAGE="Subagent finished"
+    ;;
+esac
+
+if [ -n "$NOTIFY_TITLE" ]; then
+  [ "$BELL" = true ] && { printf '\a' > /dev/tty 2>/dev/null || true; }
 
   # Read notification setting (default: Always)
   SETTINGS_FILE="$HOME/.config/zellij/plugins/zellaude.json"
@@ -95,16 +122,15 @@ if [ "$HOOK_EVENT" = "PermissionRequest" ]; then
   esac
 
   if [ "$SHOULD_NOTIFY" = true ]; then
-    TOOL_SUFFIX=""
-    [ -n "$TOOL_NAME" ] && TOOL_SUFFIX=" — $TOOL_NAME"
-    TITLE="⚠ Claude Code"
-    MESSAGE="Permission requested${TOOL_SUFFIX}"
+    TITLE="$NOTIFY_TITLE"
+    MESSAGE="$NOTIFY_MESSAGE"
 
-    # Rate-limit: one notification per pane per 10 seconds.
+    # Rate-limit: one notification per pane per event type per 10 seconds.
     # Pane ids are per-session, so the lock must be session-qualified —
     # otherwise pane 5 in two sessions would share a lock and silently
-    # swallow each other's permission notifications.
-    LOCK="/tmp/zellaude-notify-${ZELLIJ_SESSION_NAME//[^a-zA-Z0-9_-]/_}-${ZELLIJ_PANE_ID}"
+    # swallow each other's notifications. Qualifying by event too keeps a
+    # Stop from suppressing a PermissionRequest that lands right after it.
+    LOCK="/tmp/zellaude-notify-${ZELLIJ_SESSION_NAME//[^a-zA-Z0-9_-]/_}-${ZELLIJ_PANE_ID}-${HOOK_EVENT}"
     NOW=$(date +%s)
     LAST=0
     [ -f "$LOCK" ] && LAST=$(cat "$LOCK" 2>/dev/null)
