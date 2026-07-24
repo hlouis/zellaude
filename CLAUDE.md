@@ -77,3 +77,13 @@ Fields to read first for the "tab flashes forever" class of bug: `flash_deadline
 ## Versioning
 
 `installer.rs` tags the installed hook script with `# zellaude v<CARGO_PKG_VERSION>` (from `Cargo.toml`). On load the plugin checks this tag and re-installs the hook + re-registers settings when the version changes. Bumping the version in `Cargo.toml` is what triggers users' hooks to update.
+
+**Old instances clobber the hook back.** The hook script is embedded at *compile* time (`include_str!`), so every running plugin instance carries its own copy. The version check is symmetric — an instance re-installs whenever the on-disk tag differs from *its* `CARGO_PKG_VERSION`, in either direction. So a still-running old instance will happily overwrite a newer hook with its own stale copy and stamp the old version on it. `./install.sh` alone is therefore **not** enough after changing `scripts/zellaude-hook.sh`: it updates the wasm and the hook on disk, but every un-reloaded session keeps reverting the hook. Reload the plugin in **every** running session:
+
+```bash
+zellij list-sessions                       # find them all
+zellij -s <session> action start-or-reload-plugin \
+  "file:$HOME/.config/zellij/plugins/zellaude.wasm"
+```
+
+Symptom of getting this wrong: hook edits appear to do nothing, and `grep 'zellaude v' ~/.config/zellij/plugins/zellaude-hook.sh` shows the *old* version even though the wasm on disk is new (`strings ~/.config/zellij/plugins/zellaude.wasm | grep 'zellaude v'`). Compare those two before debugging the hook logic itself.
