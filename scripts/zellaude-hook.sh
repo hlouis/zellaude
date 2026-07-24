@@ -52,6 +52,13 @@ PAYLOAD=$(jq -nc \
 #   Stop              → main turn ended: work done / Claude is waiting on you
 #                       (Claude Code can't tell "asking a question" from "finished")
 #   SubagentStop      → a subagent/Task finished
+# Title carries which session this is: the cwd's last path component
+# (e.g. ".../ai/codebuddy" → "codebuddy"). The hook can't see the Zellij
+# pane/tab name (that lives in the plugin), but cwd is right here and is the
+# name users recognize. Falls back to "Claude Code" when cwd is absent.
+PANE_NAME="Claude Code"
+[ -n "$CWD" ] && PANE_NAME="$(basename "$CWD")"
+
 NOTIFY_TITLE=""
 NOTIFY_MESSAGE=""
 BELL=false
@@ -60,15 +67,15 @@ case "$HOOK_EVENT" in
     BELL=true
     TOOL_SUFFIX=""
     [ -n "$TOOL_NAME" ] && TOOL_SUFFIX=" — $TOOL_NAME"
-    NOTIFY_TITLE="⚠ Claude Code"
+    NOTIFY_TITLE="⚠ $PANE_NAME"
     NOTIFY_MESSAGE="Permission requested${TOOL_SUFFIX}"
     ;;
   Stop)
-    NOTIFY_TITLE="✅ Claude Code"
+    NOTIFY_TITLE="✅ $PANE_NAME"
     NOTIFY_MESSAGE="Done — your turn"
     ;;
   SubagentStop)
-    NOTIFY_TITLE="✅ Claude Code"
+    NOTIFY_TITLE="✅ $PANE_NAME"
     NOTIFY_MESSAGE="Subagent finished"
     ;;
 esac
@@ -137,13 +144,29 @@ if [ -n "$NOTIFY_TITLE" ]; then
     if [ $((NOW - LAST)) -ge 10 ]; then
       echo "$NOW" > "$LOCK"
 
-      # Click callback: activate terminal + focus the pane
+      # Click callback: raise the terminal (to the right tab) + focus the pane.
       ZELLIJ_BIN=$(command -v zellij)
       FOCUS_CMD="${ZELLIJ_BIN} -s '${ZELLIJ_SESSION_NAME}' pipe --name zellaude:focus -- ${ZELLIJ_PANE_ID}"
 
       case "$(uname)" in
         Darwin)
-          [ -n "${TERM_PROGRAM:-}" ] && FOCUS_CMD="open -a '${TERM_PROGRAM}' && ${FOCUS_CMD}"
+          # `open -a` only brings the app forward — it can't pick a native tab.
+          # Ghostty 1.3+ ships an AppleScript dictionary, so for Ghostty we
+          # select the tab whose title starts with this Zellij session name
+          # (Ghostty surfaces the OSC title as `name of tab`, e.g.
+          # "Util | <pane title>"). That lands the click on the right macOS tab;
+          # the zellij pipe then focuses the right pane inside it. Other
+          # terminals fall back to `open -a` (app-level raise only).
+          if [ "${TERM_PROGRAM:-}" = "ghostty" ]; then
+            RAISE_CMD="osascript -e 'tell application \"Ghostty\"' -e 'repeat with w in windows' -e 'repeat with t in tabs of w' -e 'if (name of t) starts with \"${ZELLIJ_SESSION_NAME}\" then' -e 'select tab t' -e 'activate window w' -e 'focus (focused terminal of t)' -e 'end if' -e 'end repeat' -e 'end repeat' -e 'end tell'"
+          elif [ -n "${TERM_PROGRAM:-}" ]; then
+            RAISE_CMD="open -a '${TERM_PROGRAM}'"
+          else
+            RAISE_CMD=":"
+          fi
+          # `;` not `&&`: focus the pane even if the raise fails (e.g. TCC not
+          # yet granted), so pane focus never depends on tab selection.
+          FOCUS_CMD="${RAISE_CMD}; ${FOCUS_CMD}"
           if command -v terminal-notifier >/dev/null 2>&1; then
             terminal-notifier \
               -title "$TITLE" \
