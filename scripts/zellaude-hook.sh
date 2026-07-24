@@ -51,7 +51,6 @@ PAYLOAD=$(jq -nc \
 #   PermissionRequest → blocking, loud (bell)
 #   Stop              → main turn ended: work done / Claude is waiting on you
 #                       (Claude Code can't tell "asking a question" from "finished")
-#   SubagentStop      → a subagent/Task finished
 # Title carries which session this is: the cwd's last path component
 # (e.g. ".../ai/codebuddy" → "codebuddy"). The hook can't see the Zellij
 # pane/tab name (that lives in the plugin), but cwd is right here and is the
@@ -73,10 +72,6 @@ case "$HOOK_EVENT" in
   Stop)
     NOTIFY_TITLE="✅ $PANE_NAME"
     NOTIFY_MESSAGE="Done — your turn"
-    ;;
-  SubagentStop)
-    NOTIFY_TITLE="✅ $PANE_NAME"
-    NOTIFY_MESSAGE="Subagent finished"
     ;;
 esac
 
