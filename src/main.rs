@@ -54,12 +54,14 @@ impl ZellijPlugin for State {
                 self.tabs = tabs;
                 self.rebuild_pane_map();
                 self.refresh_focus();
+                self.publish_focus();
                 true
             }
             Event::PaneUpdate(manifest) => {
                 self.pane_manifest = Some(manifest);
                 self.rebuild_pane_map();
                 self.refresh_focus();
+                self.publish_focus();
                 true
             }
             Event::ModeUpdate(mode_info) => {
@@ -178,6 +180,10 @@ impl ZellijPlugin for State {
                 if !self.hooks_installed {
                     installer::run_install();
                 }
+                // Any publish before this point was dropped along with every
+                // other run_command — clear the debounce and write it now.
+                self.published_focus = None;
+                self.publish_focus();
                 false
             }
             _ => false,
@@ -461,6 +467,52 @@ impl State {
         // compact (single line) so each instance is one greppable log entry
         let json = serde_json::to_string(&dump).unwrap_or_default();
         eprintln!("zellaude-dump {json}");
+    }
+
+    /// Publish the *on-screen* Zellij tab's terminal pane ids to a per-session
+    /// file, so the hook script can tell "you are looking at this pane's tab"
+    /// from "this pane is buried in a background tab". The hook only knows its
+    /// own `$ZELLIJ_PANE_ID`; the pane → tab mapping lives here.
+    ///
+    /// No leader election: every instance computes the same list and writes it.
+    /// The write is temp-file + `mv` (atomic rename), so racing writers can
+    /// only ever replace the file with identical bytes and a reader never sees
+    /// a half-written file. `published_focus` skips the redundant re-writes.
+    fn publish_focus(&mut self) {
+        let (Some(session), Some(active)) = (
+            self.zellij_session_name.as_deref(),
+            self.active_tab_index,
+        ) else {
+            return;
+        };
+        let mut panes: Vec<u32> = self
+            .pane_to_tab
+            .iter()
+            .filter(|(_, (tab_index, _))| *tab_index == active)
+            .map(|(pane_id, _)| *pane_id)
+            .collect();
+        // Sorted so identical state produces identical bytes — otherwise the
+        // HashMap iteration order alone would defeat the debounce below.
+        panes.sort_unstable();
+        let json = serde_json::json!({ "active_panes": panes }).to_string();
+        if self.published_focus.as_deref() == Some(json.as_str()) {
+            return;
+        }
+        self.published_focus = Some(json.clone());
+
+        // Same sanitizing as the hook script's lock files: pane ids are only
+        // unique within a session, so the file must be session-qualified.
+        let safe: String = session
+            .chars()
+            .map(|c| if c.is_ascii_alphanumeric() || c == '_' || c == '-' { c } else { '_' })
+            .collect();
+        let json_esc = json.replace('\'', "'\\''");
+        let cmd = format!(
+            "f=/tmp/zellaude-focus-{safe}.json; printf '%s' '{json_esc}' > \"$f.$$\" && mv -f \"$f.$$\" \"$f\""
+        );
+        let mut ctx = BTreeMap::new();
+        ctx.insert("type".into(), "publish_focus".into());
+        run_command(&["sh", "-c", &cmd], ctx);
     }
 
     fn load_config(&self) {

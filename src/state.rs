@@ -175,4 +175,7 @@ pub struct State {
     pub theme: crate::theme::Theme,
     /// The terminal pane currently focused (in the active tab), if any.
     pub focused_pane: Option<u32>,
+    /// Last JSON published to the focus file, to skip redundant writes.
+    /// See `State::publish_focus`.
+    pub published_focus: Option<String>,
 }
